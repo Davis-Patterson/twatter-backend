@@ -16,9 +16,17 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [AllowAny]
     lookup_field = 'username'
     parser_classes = (MultiPartParser, FormParser, JSONParser)
+
+    def get_permissions(self):
+        if self.action == 'retrieve':
+            permission_classes = [AllowAny]
+        elif self.action in ['follow', 'unfollow', 'update', 'partial_update', 'destroy']:
+            permission_classes = [IsAuthenticated]
+        else:
+            permission_classes = [AllowAny]
+        return [permission() for permission in permission_classes]
 
     @action(detail=False, methods=['get'], url_path='profile')
     def user_profile(self, request):
