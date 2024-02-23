@@ -11,7 +11,9 @@ class IsAuthorOrAdminOrReadOnly(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return True
 
-        return obj.author == request.user or request.user.is_staff
+        if view.action == 'destroy':
+            return obj.author == request.user or request.user.is_staff
+        return True
 
 class IsOwnerOrReadOnly(BasePermission):
     """

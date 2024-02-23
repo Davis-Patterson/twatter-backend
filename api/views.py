@@ -170,18 +170,21 @@ class PostViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def like_post(self, request, pk=None):
         post = self.get_object()
-
+        if post.is_private and not post.author.followers.filter(id=request.user.id).exists():
+            return Response({"detail": "You cannot like a private post of a user you're not following."}, status=status.HTTP_403_FORBIDDEN)
+        
         if request.user in post.likers.all():
             post.likers.remove(request.user)
-            post.save()
-            return Response({"detail": "Post unliked successfully."}, status=status.HTTP_200_OK)
+            action_detail = "Post unliked successfully."
         else:
             post.likers.add(request.user)
-            post.save()
-            return Response({"detail": "Post liked successfully."}, status=status.HTTP_200_OK)
+            action_detail = "Post liked successfully."
+        
+        post.save()
+        return Response({"detail": action_detail}, status=status.HTTP_200_OK)
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
