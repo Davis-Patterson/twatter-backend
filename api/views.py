@@ -8,7 +8,6 @@ from rest_framework.decorators import action
 from rest_framework import status
 from rest_framework.response import Response
 from .permissions import IsAuthorOrAdminOrReadOnly, CanComment, IsOwnerOrReadOnly, IsOwnerOrPostAuthorOrReadOnly
-from rest_framework.permissions import IsAuthenticatedOrReadOnly 
 from rest_framework.exceptions import PermissionDenied
 from django.db.models import Q, OuterRef, Max
 from django.shortcuts import get_object_or_404
