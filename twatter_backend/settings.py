@@ -27,7 +27,11 @@ SECRET_KEY = 'django-insecure-2-$3q3m#gl!qrn&#xjphs-hvdu2yjsor+=ntmysup9062k#bpb
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['https://twatter-backend-631ce5201b8a.herokuapp.com/', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = [
+    'twatter-backend-631ce5201b8a.herokuapp.com',
+    'localhost',
+    '127.0.0.1'
+]
 
 
 # Application definition
