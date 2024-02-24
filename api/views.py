@@ -247,6 +247,19 @@ class CommentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
 
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def like_comment(self, request, pk=None):
+        comment = self.get_object()
+        if request.user in comment.likers.all():
+            comment.likers.remove(request.user)
+            action_detail = "Comment unliked successfully."
+        else:
+            comment.likers.add(request.user)
+            action_detail = "Comment liked successfully."
+
+        comment.save()
+        return Response({"detail": action_detail}, status=status.HTTP_200_OK)
+
 class MessageViewSet(viewsets.ModelViewSet):
     queryset = Message.objects.all()
     serializer_class = MessageSerializer
