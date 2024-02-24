@@ -7,11 +7,52 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
 from rest_framework import status
 from rest_framework.response import Response
-from .permissions import IsAuthorOrAdminOrReadOnly, CanComment, IsOwnerOrReadOnly, IsOwnerOrPostAuthorOrReadOnly
+from .permissions import IsAuthorOrAdminOrReadOnly, CanComment, IsOwnerOrPostAuthorOrReadOnly
 from rest_framework.exceptions import PermissionDenied
 from django.db.models import Q, OuterRef, Max
 from django.shortcuts import get_object_or_404
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from django.contrib.auth import authenticate
+from django.http import JsonResponse
+from rest_framework.authtoken.models import Token
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.utils.decorators import method_decorator
+from django.views import View
+from django.utils.http import url_has_allowed_host_and_scheme
+
+@method_decorator(ensure_csrf_cookie, name='dispatch')
+class LoginView(View):
+    def post(self, request, *args, **kwargs):
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        user = authenticate(request, username=username, password=password)
+        if user is not None:
+            token, _ = Token.objects.get_or_create(user=user)
+            response = JsonResponse({"detail": "Successfully logged in."})
+            response.set_cookie(
+                'auth_token',
+                token.key,
+                httponly=True,
+                secure=True,
+                samesite='Strict'
+            )
+            return response
+        else:
+            return JsonResponse({"detail": "Invalid credentials"}, status=401)
+
+class LogoutView(View):
+    def post(self, request, *args, **kwargs):
+        if 'auth_token' in request.COOKIES:
+            token_key = request.COOKIES['auth_token']
+            try:
+                token = Token.objects.get(key=token_key)
+                token.delete()
+                response = JsonResponse({"detail": "Successfully logged out."})
+                response.delete_cookie('auth_token')
+                return response
+            except Token.DoesNotExist:
+                pass
+        return JsonResponse({"detail": "Not logged in."}, status=400)
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
