@@ -42,6 +42,11 @@ class FollowRequestSerializer(serializers.ModelSerializer):
 class CommentSerializer(serializers.ModelSerializer):
     author_id = serializers.ReadOnlyField(source='author.id')
     author = serializers.ReadOnlyField(source='author.username')
+    likers = serializers.SlugRelatedField(
+        many=True,
+        read_only=True,
+        slug_field='username'
+    )
 
     class Meta:
         model = Comment
@@ -50,6 +55,11 @@ class CommentSerializer(serializers.ModelSerializer):
 class PostSerializer(serializers.ModelSerializer):
     author_id = serializers.ReadOnlyField(source='author.id')
     author = serializers.ReadOnlyField(source='author.username')
+    likers = serializers.SlugRelatedField(
+        many=True,
+        read_only=True,
+        slug_field='username'
+    )
     comments = CommentSerializer(many=True, read_only=True)
 
     class Meta:
