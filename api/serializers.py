@@ -67,7 +67,12 @@ class PostSerializer(serializers.ModelSerializer):
         fields = ['is_private', 'id', 'author_id', 'author', 'content', 'image', 'video', 'created_at', 'likers', 'like_count', 'comment_count', 'comments']
 
 class MessageSerializer(serializers.ModelSerializer):
-    sender = serializers.ReadOnlyField(source='sender.id')
+    sender_id = serializers.ReadOnlyField(source='sender.id')
+    sender = serializers.SlugRelatedField(
+        read_only=True,
+        slug_field='username',
+        source='sender'
+    )
     recipient = serializers.SlugRelatedField(
         slug_field='username',
         queryset=User.objects.all(),
