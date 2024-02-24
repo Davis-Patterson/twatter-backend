@@ -15,27 +15,26 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.contrib.auth import authenticate
 from django.http import JsonResponse
 from rest_framework.authtoken.models import Token
-from django.views.decorators.csrf import ensure_csrf_cookie
-from django.utils.decorators import method_decorator
 from django.views import View
 from django.utils import timezone
-from django.core.cache import cache
+from django.http import JsonResponse
+import json
 
-@method_decorator(ensure_csrf_cookie, name='dispatch')
 class LoginView(View):
     def post(self, request, *args, **kwargs):
-        username = request.POST.get('username')
-        password = request.POST.get('password')
+        data = json.loads(request.body)
+        username = data.get('username')
+        password = data.get('password')
         user = authenticate(request, username=username, password=password)
         if user is not None:
             token, _ = Token.objects.get_or_create(user=user)
-            response = JsonResponse({"detail": "Successfully logged in."})
+            response = JsonResponse({"detail": "Successfully logged in."}, safe=False)
             response.set_cookie(
                 'auth_token',
                 token.key,
                 httponly=True,
                 secure=True,
-                samesite='Strict'
+                samesite='none'
             )
             return response
         else:
@@ -43,17 +42,9 @@ class LoginView(View):
 
 class LogoutView(View):
     def post(self, request, *args, **kwargs):
-        if 'auth_token' in request.COOKIES:
-            token_key = request.COOKIES['auth_token']
-            try:
-                token = Token.objects.get(key=token_key)
-                token.delete()
-                response = JsonResponse({"detail": "Successfully logged out."})
-                response.delete_cookie('auth_token')
-                return response
-            except Token.DoesNotExist:
-                pass
-        return JsonResponse({"detail": "Not logged in."}, status=400)
+        response = JsonResponse({"detail": "Successfully logged out."})
+        response.delete_cookie('auth_token')
+        return response
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -81,13 +72,20 @@ class UserViewSet(viewsets.ModelViewSet):
             'private': user.private,
             'username': user.username,
             'display_name': user.display_name,
-            'follower_count': user.followers.count(),
-            'following_count': user.following.count(),
             'picture': user.picture.url if user.picture else None,
             'banner': user.banner.url if user.banner else None,
             'bio': user.bio,
-            'link': user.link
+            'link': user.link,
+            'follower_count': user.followers.count(),
+            'following_count': user.following.count()
         }
+        if not user.private or user.followers.filter(username=request.user.username).exists():
+            public_data['followers'] = UserSerializer(user.followers.all(), many=True).data
+            public_data['followings'] = UserSerializer(user.following.all(), many=True).data
+            
+            user_posts = Post.objects.filter(author=user).order_by('-created_at')
+            public_data['posts'] = PostSerializer(user_posts, many=True).data
+        
         return Response(public_data)
 
     @action(detail=True, methods=['get'], url_path='followers')
