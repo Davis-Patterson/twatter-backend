@@ -70,8 +70,7 @@ class MessageSerializer(serializers.ModelSerializer):
     sender_id = serializers.ReadOnlyField(source='sender.id')
     sender = serializers.SlugRelatedField(
         read_only=True,
-        slug_field='username',
-        source='sender'
+        slug_field='username'
     )
     recipient = serializers.SlugRelatedField(
         slug_field='username',
