@@ -51,7 +51,7 @@ class CanComment(BasePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        if obj.is_private:
+        if obj.private:
             return obj.author.followers.filter(id=request.user.id).exists()
         else:
             return True
