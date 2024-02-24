@@ -48,6 +48,17 @@ class UserViewSet(viewsets.ModelViewSet):
         }
         return Response(public_data)
 
+    @action(detail=True, methods=['get'], url_path='followers')
+    def followers(self, request, username=None):
+        user = get_object_or_404(User, username=username)
+        if user.is_private and not user.followers.filter(username=request.user.username).exists():
+            return Response({"detail": "You do not have permission to view the followers of this user."}, 
+                            status=status.HTTP_403_FORBIDDEN)
+
+        followers = user.followers.all()
+        serializer = UserSerializer(followers, many=True)
+        return Response(serializer.data)
+
     @action(detail=False, methods=['patch'], url_path='update', url_name='update_profile')
     def update_profile(self, request, *args, **kwargs):
         user = request.user
