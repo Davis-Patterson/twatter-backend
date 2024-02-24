@@ -7,12 +7,20 @@ from django.contrib.auth.hashers import make_password
 User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(read_only=True)
     follower_count = serializers.IntegerField(read_only=True)
     following_count = serializers.IntegerField(read_only=True)
+    followers = serializers.SerializerMethodField()
+    following = serializers.SlugRelatedField(
+        many=True, 
+        slug_field='username', 
+        queryset=User.objects.all(), 
+        required=False
+    )
 
     class Meta:
         model = User
-        fields = ('username', 'password', 'email', 'display_name', 'birthday', 'bio', 'link', 'picture', 'banner', 'follower_count', 'following_count', 'following', 'is_private')
+        fields = ( 'id', 'private', 'online', 'username', 'password', 'email', 'display_name', 'birthday', 'bio', 'link', 'picture', 'banner', 'follower_count', 'followers', 'following_count', 'following', 'last_online', 'created')
         extra_kwargs = {
             'password': {'write_only': True}
         }
@@ -30,6 +38,9 @@ class UserSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
         return instance
+    
+    def get_followers(self, obj):
+        return [follower.username for follower in obj.followers.all()]
 
 class FollowRequestSerializer(serializers.ModelSerializer):
     from_user = serializers.SlugRelatedField(slug_field='username', read_only=True)
@@ -64,7 +75,7 @@ class PostSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Post
-        fields = ['is_private', 'id', 'author_id', 'author', 'content', 'image', 'video', 'created_at', 'likers', 'like_count', 'comment_count', 'comments']
+        fields = ['private', 'id', 'author_id', 'author', 'content', 'image', 'video', 'created_at', 'likers', 'like_count', 'comment_count', 'comments']
 
 class MessageSerializer(serializers.ModelSerializer):
     sender_id = serializers.ReadOnlyField(source='sender.id')

@@ -18,7 +18,8 @@ from rest_framework.authtoken.models import Token
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.utils.decorators import method_decorator
 from django.views import View
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils import timezone
+from django.core.cache import cache
 
 @method_decorator(ensure_csrf_cookie, name='dispatch')
 class LoginView(View):
@@ -77,7 +78,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         user = self.get_object()
         public_data = {
-            'is_private': user.is_private,
+            'private': user.private,
             'username': user.username,
             'display_name': user.display_name,
             'follower_count': user.followers.count(),
@@ -92,7 +93,7 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='followers')
     def followers(self, request, username=None):
         user = get_object_or_404(User, username=username)
-        if user.is_private and not user.followers.filter(username=request.user.username).exists():
+        if user.private and not user.followers.filter(username=request.user.username).exists():
             return Response({"detail": "You do not have permission to view the followers of this user."}, 
                             status=status.HTTP_403_FORBIDDEN)
 
@@ -117,6 +118,24 @@ class UserViewSet(viewsets.ModelViewSet):
             user._prefetched_objects_cache = {}
 
         return Response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='online-status')
+    def set_online_status(self, request):
+        user = request.user
+        online_status = request.data.get('online', None)
+
+        if online_status is not None:
+            user.online = online_status
+            if not online_status:
+                user.last_online = timezone.now()
+            user.save(update_fields=['online', 'last_online'])
+
+            return Response({
+                'online': user.online,
+                'last_online': user.last_online.isoformat() if user.last_online else None
+            })
+
+        return Response({'error': 'Online status not provided'}, status=status.HTTP_400_BAD_REQUEST)
 
 class FollowViewSet(viewsets.ViewSet):
     """
@@ -153,7 +172,7 @@ class FollowViewSet(viewsets.ViewSet):
             request.user.following.remove(target_user)
             return Response({"detail": "You have unfollowed this user."}, status=status.HTTP_200_OK)
         
-        if target_user.is_private:
+        if target_user.private:
             existing_request = FollowRequest.objects.filter(from_user=request.user, to_user=target_user).first()
             if existing_request:
                 return Response({"detail": "Follow request already sent or you are already following this user."}, status=status.HTTP_409_CONFLICT)
@@ -202,7 +221,7 @@ class PostViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='by-user/(?P<username>[^/.]+)')
     def user_posts(self, request, username=None):
         target_user = get_object_or_404(User, username=username)
-        if target_user.is_private and target_user != request.user and not request.user.following.filter(username=username).exists():
+        if target_user.private and target_user != request.user and not request.user.following.filter(username=username).exists():
             return Response({"detail": "This user's posts are private."}, status=status.HTTP_403_FORBIDDEN)
 
         queryset = Post.objects.filter(author=target_user).order_by('-created_at')
@@ -215,7 +234,7 @@ class PostViewSet(viewsets.ModelViewSet):
         following_users = user.following.all()
 
         queryset = Post.objects.filter(
-            Q(author__in=following_users, author__is_private=False) | 
+            Q(author__in=following_users, author__private=False) | 
             Q(author=user)
         ).distinct().order_by('-created_at')
         
@@ -225,7 +244,7 @@ class PostViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def like_post(self, request, pk=None):
         post = self.get_object()
-        if post.is_private and not post.author.followers.filter(id=request.user.id).exists():
+        if post.private and not post.author.followers.filter(id=request.user.id).exists():
             return Response({"detail": "You cannot like a private post of a user you're not following."}, status=status.HTTP_403_FORBIDDEN)
         
         if request.user in post.likers.all():

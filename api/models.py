@@ -10,7 +10,8 @@ from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
 
 class User(AbstractUser):
-    is_private = models.BooleanField(default=False)
+    private = models.BooleanField(default=False)
+    online = models.BooleanField(default=False)
     display_name = models.CharField(max_length=20, blank=True)
     birthday = models.DateField(null=True, blank=True)
     picture = models.ImageField(upload_to='profile_pictures/', null=True, blank=True)
@@ -18,6 +19,8 @@ class User(AbstractUser):
     bio = models.CharField(max_length=200, blank=True)
     link = models.URLField(max_length=200, blank=True, null=True, help_text="Link to a website.")
     following = models.ManyToManyField('self', symmetrical=False, related_name='followers', blank=True)
+    last_online = models.DateTimeField(null=True, blank=True)
+    created = models.DateTimeField(auto_now_add=True)
 
     @property
     def follower_count(self):
@@ -40,7 +43,7 @@ class FollowRequest(models.Model):
         return f"{self.from_user} -> {self.to_user}"
 
 class Post(models.Model): 
-    is_private = models.BooleanField(default=False)
+    private = models.BooleanField(default=False)
     content = models.TextField(blank=True, null=True, max_length=500)
     image = models.ImageField(upload_to='post_images/', blank=True, null=True)
     video = models.FileField(upload_to='post_videos/', blank=True, null=True)
