@@ -19,8 +19,4 @@ DATABASES = {
     'default': dj_database_url.config(default=os.environ.get('DATABASE_URL'))
 }
 
-STATICFILES_DIRS = [
-    BASE_DIR / "static",
-]
-
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
