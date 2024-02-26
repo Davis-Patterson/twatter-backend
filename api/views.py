@@ -1,6 +1,6 @@
 from rest_framework import viewsets
-from .models import Post, User, Comment, Message, FollowRequest
-from .serializers import PostSerializer, UserSerializer, CommentSerializer, MessageSerializer, FollowRequestSerializer
+from .models import Post, User, Comment, Message, FollowRequest, Notification
+from .serializers import PostSerializer, UserSerializer, CommentSerializer, MessageSerializer, FollowRequestSerializer, NotificationSerializer
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAuthenticatedOrReadOnly
 from rest_framework.authentication import TokenAuthentication
 from django_filters.rest_framework import DjangoFilterBackend
@@ -134,6 +134,56 @@ class UserViewSet(viewsets.ModelViewSet):
             })
 
         return Response({'error': 'Online status not provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'], url_path='notifications')
+    def user_notifications(self, request):
+        user = request.user
+        if not user.is_authenticated:
+            return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        notifications = Notification.objects.filter(recipient=user).order_by('-date')
+        serializer = NotificationSerializer(notifications, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['patch'], url_path='mark-notifications-read')
+    def mark_notifications_read(self, request, *args, **kwargs):
+        user = request.user
+        if not user.is_authenticated:
+            return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        notification_ids = request.data.get('notification_ids', [])
+        if not notification_ids:
+            return Response({'error': 'No notification IDs provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+        notifications_to_mark = Notification.objects.filter(recipient=user, id__in=notification_ids)
+
+        notifications_to_mark.update(read=True)
+
+        return Response({'detail': 'Notifications marked as read'}, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['patch'], url_path='mark-all-notifications-read')
+    def mark_all_notifications_read(self, request, *args, **kwargs):
+        user = request.user
+        if not user.is_authenticated:
+            return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        Notification.objects.filter(recipient=user).update(read=True)
+
+        return Response({'detail': 'All notifications marked as read'}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='check-username', url_name='check_username')
+    def check_username(self, request, *args, **kwargs):
+        username_query = request.query_params.get('username', None)
+
+        if username_query is None:
+            return Response({'error': 'No username provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if request.user.is_authenticated:
+            is_available = not User.objects.filter(Q(username__iexact=username_query) & ~Q(pk=request.user.pk)).exists()
+        else:
+            is_available = not User.objects.filter(username__iexact=username_query).exists()
+
+        return Response({'is_available': is_available})
 
 class FollowViewSet(viewsets.ViewSet):
     """

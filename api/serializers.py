@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import FollowRequest, User, Post, Comment, Message
+from .models import FollowRequest, User, Post, Comment, Message, Notification
 from rest_framework.authtoken.models import Token
 from django.contrib.auth.hashers import make_password
 
@@ -53,6 +53,11 @@ class FollowRequestSerializer(serializers.ModelSerializer):
 class CommentSerializer(serializers.ModelSerializer):
     author_id = serializers.ReadOnlyField(source='author.id')
     author = serializers.ReadOnlyField(source='author.username')
+    tagged = serializers.SlugRelatedField(
+        many=True,
+        read_only=True,
+        slug_field='username'
+    )
     likers = serializers.SlugRelatedField(
         many=True,
         read_only=True,
@@ -61,11 +66,16 @@ class CommentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Comment
-        fields = ['id', 'post', 'author_id', 'author', 'content', 'created_at', 'likers', 'like_count']
+        fields = ['id', 'post', 'author_id', 'author', 'content', 'created_at', 'tagged', 'likers', 'like_count']
 
 class PostSerializer(serializers.ModelSerializer):
     author_id = serializers.ReadOnlyField(source='author.id')
     author = serializers.ReadOnlyField(source='author.username')
+    tagged = serializers.SlugRelatedField(
+        many=True,
+        read_only=True,
+        slug_field='username'
+    )
     likers = serializers.SlugRelatedField(
         many=True,
         read_only=True,
@@ -75,7 +85,7 @@ class PostSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Post
-        fields = ['private', 'id', 'author_id', 'author', 'content', 'image', 'video', 'created_at', 'likers', 'like_count', 'comment_count', 'comments']
+        fields = ['private', 'id', 'author_id', 'author', 'content', 'image', 'video', 'created_at', 'tagged', 'likers', 'like_count', 'comment_count', 'comments']
 
 class MessageSerializer(serializers.ModelSerializer):
     sender_id = serializers.ReadOnlyField(source='sender.id')
@@ -101,3 +111,55 @@ class MessageSerializer(serializers.ModelSerializer):
         recipient = User.objects.get(username=recipient_username)
         message = Message.objects.create(recipient=recipient, **validated_data)
         return message
+
+class NotificationSerializer(serializers.ModelSerializer):
+    recipient = serializers.SlugRelatedField(slug_field='username', read_only=True)
+    sender = serializers.SlugRelatedField(slug_field='username', read_only=True)
+    post = serializers.SerializerMethodField()
+    comment = serializers.SerializerMethodField()
+    follow_request = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Notification
+        fields = ['id', 'recipient', 'sender', 'notification_type', 'date', 'read', 'post', 'comment', 'follow_request']
+
+    def get_post(self, obj):
+        if obj.post:
+            post_data = {
+                'id': obj.post.id,
+                'private': obj.post.private,
+                'content': obj.post.content[:50],
+                'image': obj.post.image.url if obj.post.image and hasattr(obj.post.image, 'url') else None,
+                'video': obj.post.video.url if obj.post.video and hasattr(obj.post.video, 'url') else None,
+                'created_at': obj.post.created_at
+            }
+            return post_data
+        return None
+
+    def get_comment(self, obj):
+        if obj.comment:
+            comment_data = {
+                'id': obj.comment.id,
+                'content': obj.comment.content[:50],
+                'created_at': obj.comment.created_at
+            }
+            post = obj.comment.post
+            if post:
+                comment_data['post'] = {
+                    'id': post.id,
+                    'author': post.author.username,
+                    'content': post.content[:50],
+                }
+            return comment_data
+        return None
+
+    def get_follow_request(self, obj):
+        if obj.follow_request:
+            return {
+                'id': obj.follow_request.id,
+                'from_user': obj.follow_request.from_user.username,
+                'to_user': obj.follow_request.to_user.username,
+                'created_at': obj.follow_request.created_at,
+                'is_approved': obj.follow_request.is_approved
+            }
+        return None

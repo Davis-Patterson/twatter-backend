@@ -49,21 +49,21 @@ class Post(models.Model):
     video = models.FileField(upload_to='post_videos/', blank=True, null=True)
     author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='posts')
     created_at = models.DateTimeField(auto_now_add=True)
+    tagged = models.ManyToManyField(User, related_name='tagged_in_posts', blank=True)
     likers = models.ManyToManyField(User, related_name='liked_posts', blank=True)
     like_count = models.IntegerField(default=0)
     comment_count = models.IntegerField(default=0)
 
     def clean(self):
         if not self.content and not self.image and not self.video:
-            raise ValidationError('Posts must have either text, image, or video content.')
-        if sum(bool(field) for field in [self.content, self.image, self.video]) > 1:
-            raise ValidationError('Posts can only have one type of content (text, image, or video).')
+            raise ValidationError('Posts must have at least some content (text, image, or video).')
 
 class Comment(models.Model):
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='comments')
     author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments')
     content = models.CharField(max_length=300)
     created_at = models.DateTimeField(auto_now_add=True)
+    tagged = models.ManyToManyField(User, related_name='tagged_in_comments', blank=True)
     likers = models.ManyToManyField(User, related_name='liked_comments')
     like_count = models.IntegerField(default=0)
 
@@ -78,6 +78,27 @@ class Message(models.Model):
 
     def clean(self):
         if not self.content and not self.image and not self.video:
-            raise ValidationError('Messages must have either text, image, or video content.')
-        if sum(bool(field) for field in [self.content, self.image, self.video]) > 1:
-            raise ValidationError('Messages can only have one type of content (text, image, or video).')
+            raise ValidationError('Comments must have at least some content (text, image, or video).')
+
+class Notification(models.Model):
+    TYPE_CHOICES = (
+        ('tag', 'Tag'),
+        ('like_post', 'Like on Post'),
+        ('like_comment', 'Like on Comment'),
+        ('follow', 'Follow'),
+        ('follow_request', 'Follow Request'),
+    )
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='+')
+    notification_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    date = models.DateTimeField(auto_now_add=True)
+    read = models.BooleanField(default=False)
+    post = models.ForeignKey(Post, on_delete=models.SET_NULL, null=True, blank=True)
+    comment = models.ForeignKey(Comment, on_delete=models.SET_NULL, null=True, blank=True)
+    follow_request = models.ForeignKey(FollowRequest, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"{self.sender} -> {self.recipient}: {self.notification_type}"
