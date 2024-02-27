@@ -1,12 +1,12 @@
 from rest_framework import viewsets
-from .models import Post, User, Comment, Message, FollowRequest, Notification
-from .serializers import PostSerializer, UserSerializer, CommentSerializer, MessageSerializer, FollowRequestSerializer, NotificationSerializer
+from .models import Post, User, Comment, Message, FollowRequest, Notification, Poke
+from .serializers import PostSerializer, UserSerializer, CommentSerializer, MessageSerializer, FollowRequestSerializer, NotificationSerializer, PokeSerializer
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAuthenticatedOrReadOnly
 from rest_framework.authentication import TokenAuthentication
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
-from rest_framework import status
 from rest_framework.response import Response
+from rest_framework import viewsets, status
 from .permissions import IsAuthorOrAdminOrReadOnly, CanComment, IsOwnerOrPostAuthorOrReadOnly
 from rest_framework.exceptions import PermissionDenied
 from django.db.models import Q, OuterRef, Max
@@ -17,6 +17,7 @@ from django.http import JsonResponse
 from rest_framework.authtoken.models import Token
 from django.views import View
 from django.utils import timezone
+from django.utils.timezone import now
 from django.http import JsonResponse
 import json
 
@@ -184,6 +185,29 @@ class UserViewSet(viewsets.ModelViewSet):
             is_available = not User.objects.filter(username__iexact=username_query).exists()
 
         return Response({'is_available': is_available})
+
+    @action(detail=False, methods=['get'], url_path='check-auth')
+    def check_auth_status(self, request):
+        """
+        Endpoint to check the user's authentication status.
+        """
+        if request.user.is_authenticated:
+            return Response({'status': 'Authenticated', 'user': request.user.username}, status=status.HTTP_200_OK)
+        else:
+            return Response({'status': 'Unauthenticated'}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['delete'], url_path='delete-notification')
+    def delete_notification(self, request, pk=None):
+        """
+        Delete a notification for a user.
+        """
+        user = request.user
+        if not user.is_authenticated:
+            return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        notification = get_object_or_404(Notification, pk=pk, recipient=user)
+        notification.delete()
+        return Response({"detail": "Notification deleted."}, status=status.HTTP_204_NO_CONTENT)
 
 class FollowViewSet(viewsets.ViewSet):
     """
@@ -411,3 +435,54 @@ class MessageViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(messages, many=True)
         return Response(serializer.data)
+
+class PokeViewSet(viewsets.ViewSet):
+    """
+    A viewset for viewing and editing user pokes.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        """
+        Optionally restricts the returned pokes to a given user,
+        by filtering against a `username` query parameter in the URL.
+        """
+        queryset = Poke.objects.filter(recipient=request.user, read=False)
+        serializer = PokeSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='send')
+    def send_poke(self, request, pk=None):
+        """
+        Send a poke to a user.
+        """
+        sender = request.user
+        recipient = get_object_or_404(User, pk=pk)
+
+        if not recipient.can_poke:
+            return Response({"detail": "User cannot be poked."}, status=status.HTTP_403_FORBIDDEN)
+
+        if sender == recipient:
+            return Response({"detail": "You cannot poke yourself."}, status=status.HTTP_400_BAD_REQUEST)
+
+        poke = Poke.objects.create(sender=sender, recipient=recipient)
+
+        Notification.objects.create(
+            recipient=recipient,
+            sender=sender,
+            notification_type='poke',
+            date=now(),
+            poke=poke,
+        )
+
+        return Response({"detail": f"You have poked {recipient.username}!"}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='mark-as-read')
+    def mark_as_read(self, request, pk=None):
+        """
+        Mark a poke as read.
+        """
+        poke = get_object_or_404(Poke, pk=pk, recipient=request.user)
+        poke.read = True
+        poke.save()
+        return Response({"detail": "Poke marked as read."}, status=status.HTTP_200_OK)

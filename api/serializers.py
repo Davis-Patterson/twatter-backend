@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import FollowRequest, User, Post, Comment, Message, Notification
+from .models import FollowRequest, User, Post, Comment, Message, Notification, Poke
 from rest_framework.authtoken.models import Token
 from django.contrib.auth.hashers import make_password
 
@@ -112,16 +112,27 @@ class MessageSerializer(serializers.ModelSerializer):
         message = Message.objects.create(recipient=recipient, **validated_data)
         return message
 
+class PokeSerializer(serializers.ModelSerializer):
+    sender = serializers.SlugRelatedField(slug_field='username', read_only=True)
+    recipient = serializers.SlugRelatedField(slug_field='username', read_only=True)
+    message = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Poke
+        fields = ['id', 'sender', 'recipient', 'timestamp', 'read', 'message']
+        read_only_fields = ['id', 'sender', 'recipient', 'timestamp', 'message']
+
 class NotificationSerializer(serializers.ModelSerializer):
     recipient = serializers.SlugRelatedField(slug_field='username', read_only=True)
     sender = serializers.SlugRelatedField(slug_field='username', read_only=True)
     post = serializers.SerializerMethodField()
     comment = serializers.SerializerMethodField()
     follow_request = serializers.SerializerMethodField()
+    poke = serializers.SerializerMethodField()
 
     class Meta:
         model = Notification
-        fields = ['id', 'recipient', 'sender', 'notification_type', 'date', 'read', 'post', 'comment', 'follow_request']
+        fields = ['id', 'recipient', 'sender', 'notification_type', 'date', 'read', 'post', 'comment', 'follow_request', 'poke']
 
     def get_post(self, obj):
         if obj.post:
@@ -161,5 +172,18 @@ class NotificationSerializer(serializers.ModelSerializer):
                 'to_user': obj.follow_request.to_user.username,
                 'created_at': obj.follow_request.created_at,
                 'is_approved': obj.follow_request.is_approved
+            }
+        return None
+
+    def get_poke(self, obj):
+        if obj.poke:
+            message = f"{obj.poke.sender.username} poked {obj.poke.recipient.username}"
+            return {
+                'id': obj.poke.id,
+                'sender': obj.poke.sender.username,
+                'recipient': obj.poke.recipient.username,
+                'message': message,
+                'read': obj.poke.read,
+                'timestamp': obj.poke.timestamp
             }
         return None

@@ -21,6 +21,7 @@ class User(AbstractUser):
     following = models.ManyToManyField('self', symmetrical=False, related_name='followers', blank=True)
     last_online = models.DateTimeField(null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
+    can_poke = models.BooleanField(default=True)
 
     @property
     def follower_count(self):
@@ -80,6 +81,15 @@ class Message(models.Model):
         if not self.content and not self.image and not self.video:
             raise ValidationError('Comments must have at least some content (text, image, or video).')
 
+class Poke(models.Model):
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_pokes')
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_pokes')
+    timestamp = models.DateTimeField(auto_now_add=True)
+    read = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.sender} poked {self.recipient}"
+
 class Notification(models.Model):
     TYPE_CHOICES = (
         ('tag', 'Tag'),
@@ -87,6 +97,7 @@ class Notification(models.Model):
         ('like_comment', 'Like on Comment'),
         ('follow', 'Follow'),
         ('follow_request', 'Follow Request'),
+        ('poke', 'Poke'),
     )
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='+')
@@ -96,6 +107,7 @@ class Notification(models.Model):
     post = models.ForeignKey(Post, on_delete=models.SET_NULL, null=True, blank=True)
     comment = models.ForeignKey(Comment, on_delete=models.SET_NULL, null=True, blank=True)
     follow_request = models.ForeignKey(FollowRequest, on_delete=models.SET_NULL, null=True, blank=True)
+    poke = models.ForeignKey(Poke, on_delete=models.SET_NULL, null=True, blank=True)
 
     class Meta:
         ordering = ['-date']
