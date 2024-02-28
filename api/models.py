@@ -8,6 +8,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
+from django.utils.translation import gettext_lazy as _
 
 class User(AbstractUser):
     private = models.BooleanField(default=False)
@@ -32,16 +33,19 @@ class User(AbstractUser):
         return self.following.count()
 
 class FollowRequest(models.Model):
+    class RequestStatus(models.TextChoices):
+        PENDING = 'PND', _('Pending')
+        APPROVED = 'APV', _('Approved')
+        DECLINED = 'DCL', _('Declined')
+        CANCELLED = 'CNL', _('Cancelled')
+
     from_user = models.ForeignKey(User, related_name='sent_follow_requests', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='received_follow_requests', on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
-    is_approved = models.BooleanField(default=False)
-
-    class Meta:
-        unique_together = ('from_user', 'to_user')
+    status = models.CharField(max_length=3, choices=RequestStatus.choices, default=RequestStatus.PENDING)
 
     def __str__(self):
-        return f"{self.from_user} -> {self.to_user}"
+        return f"{self.from_user} -> {self.to_user}: {self.status}"
 
 class Post(models.Model): 
     private = models.BooleanField(default=False)

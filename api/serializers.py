@@ -20,7 +20,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ( 'id', 'private', 'online', 'username', 'password', 'email', 'display_name', 'birthday', 'bio', 'link', 'picture', 'banner', 'follower_count', 'followers', 'following_count', 'following', 'last_online', 'created')
+        fields = ( 'id', 'username', 'private', 'online', 'password', 'email', 'display_name', 'birthday', 'bio', 'link', 'picture', 'banner', 'follower_count', 'followers', 'following_count', 'following', 'last_online', 'created')
         extra_kwargs = {
             'password': {'write_only': True}
         }
@@ -38,17 +38,58 @@ class UserSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
         return instance
-    
+
     def get_followers(self, obj):
         return [follower.username for follower in obj.followers.all()]
+
+class UserPublicSerializer(serializers.ModelSerializer):
+    follower_count = serializers.IntegerField(source='followers.count', read_only=True)
+    following_count = serializers.IntegerField(source='following.count', read_only=True)
+    follow_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'display_name', 'picture', 'banner', 'bio', 'link', 'follower_count', 'following_count', 'follow_status')
+
+    def get_follow_status(self, obj):
+        request_user = self.context.get('request').user
+        if not request_user.is_authenticated:
+            return None
+        if obj == request_user:
+            return 'self'
+        if obj.followers.filter(username=request_user.username).exists() and request_user.following.filter(username=obj.username).exists():
+            return 'mutual'
+        if obj.followers.filter(username=request_user.username).exists():
+            return 'following'
+        if request_user.following.filter(username=obj.username).exists():
+            return 'follow_back'
+        follow_request = FollowRequest.objects.filter(from_user=request_user, to_user=obj).first()
+        if follow_request:
+            if follow_request.status == FollowRequest.RequestStatus.APPROVED:
+                return 'following'
+            elif follow_request.status == FollowRequest.RequestStatus.PENDING:
+                return 'pending'
+        return None
 
 class FollowRequestSerializer(serializers.ModelSerializer):
     from_user = serializers.SlugRelatedField(slug_field='username', read_only=True)
     to_user = serializers.SlugRelatedField(slug_field='username', read_only=True)
-    
+    status = serializers.SerializerMethodField()
+    code = serializers.CharField(source='status')
+
     class Meta:
         model = FollowRequest
-        fields = ['id', 'from_user', 'to_user', 'created_at', 'is_approved']
+        fields = ['id', 'status', 'detail', 'from_user', 'to_user', 'created_at', 'code']
+        extra_kwargs = {
+            'detail': {'source': '__str__', 'read_only': True},
+        }
+
+    def get_status(self, obj):
+        return obj.get_status_display()
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        return representation
 
 class CommentSerializer(serializers.ModelSerializer):
     author_id = serializers.ReadOnlyField(source='author.id')

@@ -1,6 +1,6 @@
 from rest_framework import viewsets
 from .models import Post, User, Comment, Message, FollowRequest, Notification, Poke
-from .serializers import PostSerializer, UserSerializer, CommentSerializer, MessageSerializer, FollowRequestSerializer, NotificationSerializer, PokeSerializer
+from .serializers import PostSerializer, UserSerializer, UserPublicSerializer, CommentSerializer, MessageSerializer, FollowRequestSerializer, NotificationSerializer, PokeSerializer
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAuthenticatedOrReadOnly
 from rest_framework.authentication import TokenAuthentication
 from django_filters.rest_framework import DjangoFilterBackend
@@ -73,6 +73,7 @@ class UserViewSet(viewsets.ModelViewSet):
             'private': user.private,
             'username': user.username,
             'display_name': user.display_name,
+            'follow_status': None,
             'picture': user.picture.url if user.picture else None,
             'banner': user.banner.url if user.banner else None,
             'bio': user.bio,
@@ -80,25 +81,28 @@ class UserViewSet(viewsets.ModelViewSet):
             'follower_count': user.followers.count(),
             'following_count': user.following.count()
         }
-        if not user.private or user.followers.filter(username=request.user.username).exists():
-            public_data['followers'] = UserSerializer(user.followers.all(), many=True).data
-            public_data['followings'] = UserSerializer(user.following.all(), many=True).data
-            
-            user_posts = Post.objects.filter(author=user).order_by('-created_at')
-            public_data['posts'] = PostSerializer(user_posts, many=True).data
-        
+
+        if request.user == user:
+            public_data['follow_status'] = 'self'
+        elif request.user.is_authenticated:
+            following = user.followers.filter(username=request.user.username).exists()
+            followed_back = request.user.followers.filter(username=user.username).exists()
+
+            if following and followed_back:
+                public_data['follow_status'] = 'mutual'
+            elif following:
+                public_data['follow_status'] = 'following'
+            elif followed_back:
+                public_data['follow_status'] = 'follow_back'
+
+            follow_request = FollowRequest.objects.filter(from_user=request.user, to_user=user).first()
+            if follow_request:
+                if follow_request.status == FollowRequest.RequestStatus.APPROVED:
+                    public_data['follow_status'] = 'following'
+                elif follow_request.status == FollowRequest.RequestStatus.PENDING:
+                    public_data['follow_status'] = 'pending'
+
         return Response(public_data)
-
-    @action(detail=True, methods=['get'], url_path='followers')
-    def followers(self, request, username=None):
-        user = get_object_or_404(User, username=username)
-        if user.private and not user.followers.filter(username=request.user.username).exists():
-            return Response({"detail": "You do not have permission to view the followers of this user."}, 
-                            status=status.HTTP_403_FORBIDDEN)
-
-        followers = user.followers.all()
-        serializer = UserSerializer(followers, many=True)
-        return Response(serializer.data)
 
     @action(detail=False, methods=['patch'], url_path='update', url_name='update_profile')
     def update_profile(self, request, *args, **kwargs):
@@ -136,44 +140,9 @@ class UserViewSet(viewsets.ModelViewSet):
 
         return Response({'error': 'Online status not provided'}, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=['get'], url_path='notifications')
-    def user_notifications(self, request):
-        user = request.user
-        if not user.is_authenticated:
-            return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
-        
-        notifications = Notification.objects.filter(recipient=user).order_by('-date')
-        serializer = NotificationSerializer(notifications, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=['patch'], url_path='mark-notifications-read')
-    def mark_notifications_read(self, request, *args, **kwargs):
-        user = request.user
-        if not user.is_authenticated:
-            return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
-
-        notification_ids = request.data.get('notification_ids', [])
-        if not notification_ids:
-            return Response({'error': 'No notification IDs provided'}, status=status.HTTP_400_BAD_REQUEST)
-
-        notifications_to_mark = Notification.objects.filter(recipient=user, id__in=notification_ids)
-
-        notifications_to_mark.update(read=True)
-
-        return Response({'detail': 'Notifications marked as read'}, status=status.HTTP_200_OK)
-    
-    @action(detail=False, methods=['patch'], url_path='mark-all-notifications-read')
-    def mark_all_notifications_read(self, request, *args, **kwargs):
-        user = request.user
-        if not user.is_authenticated:
-            return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
-
-        Notification.objects.filter(recipient=user).update(read=True)
-
-        return Response({'detail': 'All notifications marked as read'}, status=status.HTTP_200_OK)
-
     @action(detail=False, methods=['get'], url_path='check-username', url_name='check_username')
     def check_username(self, request, *args, **kwargs):
+        """Endpoint to check availability of usernames"""
         username_query = request.query_params.get('username', None)
 
         if username_query is None:
@@ -196,18 +165,46 @@ class UserViewSet(viewsets.ModelViewSet):
         else:
             return Response({'status': 'Unauthenticated'}, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['delete'], url_path='delete-notification')
-    def delete_notification(self, request, pk=None):
-        """
-        Delete a notification for a user.
-        """
-        user = request.user
-        if not user.is_authenticated:
-            return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
-        
-        notification = get_object_or_404(Notification, pk=pk, recipient=user)
-        notification.delete()
-        return Response({"detail": "Notification deleted."}, status=status.HTTP_204_NO_CONTENT)
+    @action(detail=True, methods=['get'], url_path='followers')
+    def user_followers(self, request, username=None):
+        """Endpoint to retrieve followers list"""
+        user = self.get_object()
+        if (user.private and user != request.user and 
+                not user.followers.filter(username=request.user.username).exists()):
+            return Response({"detail": "You do not have permission to view the followers of this user."}, 
+                            status=status.HTTP_403_FORBIDDEN)
+
+        followers = user.followers.all()
+        serializer = UserPublicSerializer(followers, many=True, context={'request': request})
+        data = self.reorder_users(serializer.data, request.user)
+        return Response(data)
+
+    @action(detail=True, methods=['get'], url_path='followings')
+    def user_followings(self, request, username=None):
+        """Endpoint to retrieve followings list"""
+        user = self.get_object()
+        if (user.private and user != request.user and 
+                not user.following.filter(username=request.user.username).exists()):
+            return Response({"detail": "You do not have permission to view the followings of this user."}, 
+                            status=status.HTTP_403_FORBIDDEN)
+
+        followings = user.following.all()
+        serializer = UserPublicSerializer(followings, many=True, context={'request': request})
+        data = self.reorder_users(serializer.data, request.user)
+        return Response(data)
+
+    def reorder_users(self, users_data, current_user):
+        """Reorder users to have the current user at the top if they are in the list."""
+        current_user_data = None
+        reordered_data = []
+        for user_data in users_data:
+            if user_data['username'] == current_user.username:
+                current_user_data = user_data
+            else:
+                reordered_data.append(user_data)
+        if current_user_data:
+            reordered_data.insert(0, current_user_data)
+        return reordered_data
 
 class FollowViewSet(viewsets.ViewSet):
     """
@@ -241,40 +238,101 @@ class FollowViewSet(viewsets.ViewSet):
             return Response({"detail": "You cannot follow yourself."}, status=status.HTTP_400_BAD_REQUEST)
         
         if request.user.following.filter(username=pk).exists():
-            request.user.following.remove(target_user)
-            return Response({"detail": "You have unfollowed this user."}, status=status.HTTP_200_OK)
+            return Response({"detail": "You are already following this user."}, status=status.HTTP_400_BAD_REQUEST)
         
-        if target_user.private:
-            existing_request = FollowRequest.objects.filter(from_user=request.user, to_user=target_user).first()
-            if existing_request:
-                return Response({"detail": "Follow request already sent or you are already following this user."}, status=status.HTTP_409_CONFLICT)
-            
-            FollowRequest.objects.create(from_user=request.user, to_user=target_user)
-            return Response({"detail": "Follow request sent."}, status=status.HTTP_202_ACCEPTED)
-        else:
-            request.user.following.add(target_user)
-            return Response({"detail": "You are now following this user."}, status=status.HTTP_200_OK)
+        existing_request = FollowRequest.objects.filter(
+            from_user=request.user, to_user=target_user
+        ).exclude(
+            status=FollowRequest.RequestStatus.DECLINED
+        ).exclude(
+            status=FollowRequest.RequestStatus.CANCELLED
+        ).first()
+        
+        if existing_request:
+            if existing_request.status == FollowRequest.RequestStatus.PENDING:
+                return Response({"detail": "Follow request already sent."}, status=status.HTTP_409_CONFLICT)
+            elif existing_request.status == FollowRequest.RequestStatus.APPROVED:
+                return Response({"detail": "You are already following this user."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not existing_request or existing_request.status in [FollowRequest.RequestStatus.DECLINED, FollowRequest.RequestStatus.CANCELLED]:
+            if target_user.private:
+                FollowRequest.objects.create(from_user=request.user, to_user=target_user, status=FollowRequest.RequestStatus.PENDING)
+                return Response({"detail": "Follow request sent."}, status=status.HTTP_202_ACCEPTED)
+            else:
+                request.user.following.add(target_user)
+                return Response({"detail": "You are now following this user."}, status=status.HTTP_200_OK)
+        
+        return Response({"detail": "Unable to send follow request."}, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=True, methods=['post'], url_path='approve-follow-request')
+    @action(detail=True, methods=['get'], url_path='detail')
+    def follow_request_detail(self, request, pk=None):
+        """
+        Retrieve a single follow request.
+        """
+        follow_request = get_object_or_404(FollowRequest, id=pk, to_user=request.user)
+        serializer = FollowRequestSerializer(follow_request)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='approve')
     def approve_follow_request(self, request, pk=None):
-        follow_request = get_object_or_404(FollowRequest, id=pk, to_user=request.user, is_approved=False)
-        follow_request.is_approved = True
+        follow_request = get_object_or_404(FollowRequest, id=pk, to_user=request.user, status=FollowRequest.RequestStatus.PENDING)
+        follow_request.status = FollowRequest.RequestStatus.APPROVED
         follow_request.save()
         follow_request.to_user.followers.add(follow_request.from_user)
         return Response({"detail": "Follow request approved."}, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['post'], url_path='reject-follow-request')
+    @action(detail=True, methods=['post'], url_path='reject')
     def reject_follow_request(self, request, pk=None):
         follow_request = get_object_or_404(FollowRequest, id=pk, to_user=request.user)
-        follow_request.delete()
-        return Response({"detail": "Follow request rejected."}, status=status.HTTP_204_NO_CONTENT)
-    
-    @action(detail=False, methods=['get'], url_path='pending-follow-requests')
+        follow_request.status = FollowRequest.RequestStatus.DECLINED
+        follow_request.save()
+        return Response({"detail": "Follow request rejected."}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='pending')
     def pending_follow_requests(self, request):
-        pending_requests = FollowRequest.objects.filter(to_user=request.user, is_approved=False)
+        pending_requests = FollowRequest.objects.filter(to_user=request.user, status=FollowRequest.RequestStatus.PENDING)
         serializer = FollowRequestSerializer(pending_requests, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['get'], url_path='all')
+    def all_follow_requests(self, request):
+        all_requests = FollowRequest.objects.filter(to_user=request.user)
+        serializer = FollowRequestSerializer(all_requests, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='unfollow')
+    def unfollow_user(self, request, pk=None):
+        """Allows a user to unfollow another user by username."""
+        target_user = get_object_or_404(User, username=pk)
+        user_following = request.user.following
+
+        if not user_following.filter(pk=target_user.pk).exists():
+            return Response({"detail": "You are not following this user."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user_following.remove(target_user)
+
+        FollowRequest.objects.filter(
+            from_user=request.user,
+            to_user=target_user,
+            status=FollowRequest.RequestStatus.PENDING
+        ).delete()
+
+        FollowRequest.objects.filter(
+            from_user=request.user,
+            to_user=target_user,
+            status=FollowRequest.RequestStatus.APPROVED
+        ).update(status=FollowRequest.RequestStatus.CANCELLED)
+
+        return Response({"detail": "You have unfollowed the user."}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['delete'], url_path='delete')
+    def delete_follow_request(self, request, pk=None):
+        """Deletes a follow request."""
+        follow_request = get_object_or_404(FollowRequest, pk=pk, from_user=request.user)
+
+        follow_request.delete()
+
+        return Response({"detail": "Follow request deleted."}, status=status.HTTP_204_NO_CONTENT)
 
 class PostViewSet(viewsets.ModelViewSet):
     queryset = Post.objects.all()
@@ -486,3 +544,49 @@ class PokeViewSet(viewsets.ViewSet):
         poke.read = True
         poke.save()
         return Response({"detail": "Poke marked as read."}, status=status.HTTP_200_OK)
+
+class NotificationViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        queryset = Notification.objects.filter(recipient=request.user).order_by('-date')
+        serializer = NotificationSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['patch'], url_path='mark-read')
+    def mark_read(self, request, *args, **kwargs):
+        user = request.user
+        if not user.is_authenticated:
+            return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        notification_ids = request.data.get('notification_ids', [])
+        if not notification_ids:
+            return Response({'error': 'No notification IDs provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+        notifications_to_mark = Notification.objects.filter(recipient=user, id__in=notification_ids)
+        notifications_to_mark.update(read=True)
+        return Response({'detail': 'Notifications marked as read'}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['patch'], url_path='mark-all-read')
+    def mark_all_read(self, request, *args, **kwargs):
+        user = request.user
+        if not user.is_authenticated:
+            return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        Notification.objects.filter(recipient=user).update(read=True)
+
+        return Response({'detail': 'All notifications marked as read'}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['delete'], url_path='delete')
+    def delete(self, request, pk=None):
+        """
+        Delete a notification for a user.
+        """
+        user = request.user
+        if not user.is_authenticated:
+            return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        notification = get_object_or_404(Notification, pk=pk, recipient=user)
+        notification.delete()
+        return Response({"detail": "Notification deleted."}, status=status.HTTP_204_NO_CONTENT)
+    
